@@ -1,5 +1,5 @@
 {
-  "name": "mflat_case_study",
+  "name": "nyc-field-finder",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,15 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "catalog": "node --experimental-strip-types scripts/catalog.mjs",
+    "poc": "node --experimental-strip-types scripts/poc.mjs"
   },
   "dependencies": {
-    "date-fns": "^4.1.0",
-    "next": "16.3.5",
-    "playwright": "^1.59.1",
+    "next": "16.3.8",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "zod": "^4.3.6"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@mapbox/vector-tile": "^2.0.4",
@@ -24,9 +23,13 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.5",
+    "eslint-config-next": "16.3.8",
     "pbf": "^4.0.1",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "type": "module"
 }

@@ -9,20 +9,19 @@
  * and reused until explicitly refreshed.
  */
 
-// These are native ESM packages; import them directly (no createRequire needed).
 import { VectorTile } from "@mapbox/vector-tile";
 import Pbf from "pbf";
 
 import { gunzipSync } from "zlib";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import path from "path";
-import type { FieldRecord, SportCode } from "./types";
+import type { FieldRecord } from "./types.ts";
+
+import { USER_AGENT } from "./data-access.ts";
+import { cachedParkNames } from "./park-names.ts";
 
 const TILE_BASE = "https://maps.nycgovparks.org/athletic_facility";
 const ZOOM = 13;
-const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
 // Tiles covering all five NYC boroughs at zoom 13
 function lonToX(lon: number, z: number) {
   return Math.floor(((lon + 180) / 360) * 2 ** z);
@@ -44,7 +43,7 @@ async function fetchTile(z: number, x: number, y: number): Promise<FieldRecord[]
   let resp: Response;
   try {
     resp = await fetch(url, {
-      headers: { "User-Agent": UA, Referer: "https://www.nycgovparks.org/" },
+      headers: { "User-Agent": USER_AGENT, Referer: "https://www.nycgovparks.org/" },
     });
   } catch {
     return [];
@@ -61,15 +60,13 @@ async function fetchTile(z: number, x: number, y: number): Promise<FieldRecord[]
   try {
     const tile = new VectorTile(new Pbf(new Uint8Array(data)));
     const layer =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (tile as any).layers["athletic_facility_permitable"] ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (tile as any).layers["athletic_facility"];
+      tile.layers["athletic_facility_permitable"] ??
+      tile.layers["athletic_facility"];
     if (!layer) return [];
 
     const out: FieldRecord[] = [];
     for (let i = 0; i < layer.length; i++) {
-      const props = layer.feature(i).properties as FieldRecord;
+      const props = layer.feature(i).properties as unknown as FieldRecord;
       if (props?.system) out.push(props);
     }
     return out;
@@ -91,7 +88,7 @@ export async function buildCatalog(opts?: {
   const cachePath = catalogPath();
   if (!opts?.force && existsSync(cachePath)) {
     const raw = readFileSync(cachePath, "utf8");
-    return JSON.parse(raw) as Record<string, FieldRecord>;
+    return withParkNames(JSON.parse(raw) as Record<string, FieldRecord>);
   }
 
   const fields: Record<string, FieldRecord> = {};
@@ -102,7 +99,7 @@ export async function buildCatalog(opts?: {
     }
   }
 
-  const BATCH = 10;
+  const BATCH = 5;
   for (let i = 0; i < tiles.length; i += BATCH) {
     const batch = tiles.slice(i, i + BATCH);
     const results = await Promise.all(
@@ -112,24 +109,17 @@ export async function buildCatalog(opts?: {
       if (!fields[f.system]) fields[f.system] = f;
     });
     opts?.onProgress?.(Math.min(i + BATCH, tiles.length), tiles.length);
-    if (i + BATCH < tiles.length) await new Promise((r) => setTimeout(r, 50));
+    if (i + BATCH < tiles.length) await new Promise((r) => setTimeout(r, 200));
   }
 
+  if (!Object.keys(fields).length) throw new Error("No fields returned; catalog was not replaced");
   writeFileSync(cachePath, JSON.stringify(fields, null, 2));
-  return fields;
+  return withParkNames(fields);
 }
 
-export function filterBySport(
-  catalog: Record<string, FieldRecord>,
-  sport: SportCode
-): FieldRecord[] {
-  return Object.values(catalog).filter(
-    (f) => f.permitable === "YES" && f.primary_sport === sport
-  );
-}
-
-export function getCatalogAge(): number | null {
-  const p = catalogPath();
-  if (!existsSync(p)) return null;
-  return Date.now() - statSync(p).mtimeMs;
+function withParkNames(fields: Record<string, FieldRecord>): Record<string, FieldRecord> {
+  const names = cachedParkNames();
+  return Object.fromEntries(Object.entries(fields).map(([system, field]) =>
+    [system, { ...field, park_name: names[field.gispropnum] }]
+  ));
 }

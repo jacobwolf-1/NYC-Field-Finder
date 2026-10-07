@@ -1,64 +1,30 @@
 import { type NextRequest } from "next/server";
-import { getFieldDetail } from "@/lib/availability-client";
+import { getFieldDetail, dateRange } from "@/lib/availability-client";
 import { normalizeFieldDetail } from "@/lib/availability-client";
-import type { FieldRecord } from "@/lib/types";
+import { parseFieldDetailQuery } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
-const MAX_DAYS = 7;
-
-function dateRange(start: string, days: number): string[] {
-  const out: string[] = [];
-  const d = new Date(start + "T00:00:00Z");
-  for (let i = 0; i < days; i++) {
-    out.push(d.toISOString().slice(0, 10));
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return out;
-}
-
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const system = searchParams.get("system");
-  const date = searchParams.get("date");
-  const rawDays = searchParams.get("days") ?? "3";
-  const days = Number(rawDays);
-
-  if (!system || !date) {
-    return Response.json({ error: "Missing required params: system, date" }, { status: 400 });
-  }
-
-  if (!Number.isInteger(days) || days < 1 || days > MAX_DAYS) {
-    return Response.json(
-      { error: `Invalid days value. Expected an integer between 1 and ${MAX_DAYS}.` },
-      { status: 400 }
-    );
-  }
+  const parsed = parseFieldDetailQuery({
+    system: searchParams.get("system"),
+    date: searchParams.get("date"),
+    days: searchParams.get("days"),
+  });
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
+  const { system, date, days } = parsed.value;
 
   try {
     const detail = await getFieldDetail(system, date);
     const dates = dateRange(date, days);
 
-    // Build a minimal FieldRecord stub — we only need system for normalization
-    const stub: FieldRecord = {
-      system,
-      name: detail.fieldName ?? system,
-      primary_sport: "",
-      sports: "",
-      surface_type: "",
-      close_at_dusk: "FALSE",
-      opening_time: "8:00 AM",
-      permit_parent: "",
-      permitable: "YES",
-    };
-
-    const normalized = normalizeFieldDetail(stub, detail, dates);
+    const normalized = normalizeFieldDetail({ system, name: detail.fieldName }, detail, dates);
 
     // Serialize each day's slots with a human-readable time
     const result = normalized.days.map((day) => ({
       date: day.date,
       isAvailable: day.isAvailable,
       closingTime: day.closingTime,
-      availableSlots: day.availableSlots,
       reservedSlots: day.reservedSlots.map((s) => ({
         time: new Date(s.unix * 1000).toLocaleTimeString("en-US", {
           hour: "numeric",
@@ -76,6 +42,6 @@ export async function GET(req: NextRequest) {
     return Response.json({ system, fieldName: detail.fieldName, days: result });
   } catch (err) {
     console.error("[field-detail]", err);
-    return Response.json({ error: "Internal error", detail: String(err) }, { status: 500 });
+    return Response.json({ error: "Unable to load field detail. Please try again." }, { status: 500 });
   }
 }

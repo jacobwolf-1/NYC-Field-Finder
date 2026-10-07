@@ -23,9 +23,12 @@ export interface FieldRecord {
   system: string;       // "M071-18-SOCCER-1" — the key used in all API calls
   name: string;         // "101st St-Soccer-04 C"
   primary_sport: string;
-  sports: string;       // comma-separated sport codes from tile data
+  sports: string;       // encoded multi-sport values; filter by primary_sport
   surface_type: string; // "Grass", "Asphalt", "Turf", etc.
   close_at_dusk: string; // "TRUE" | "FALSE"
+  gispropnum: string;
+  park_name?: string;
+  closing_time: string;
   opening_time: string; // "8:00 AM"
   permit_parent: string; // park GIS ID e.g. "M071"
   permitable: string;   // "YES" | "NO"
@@ -61,14 +64,29 @@ export interface DatetimeAvailabilityResponse {
 // Normalized availability result for a single field on a single date
 export interface DayAvailability {
   date: string;        // "2026-04-22"
-  isAvailable: boolean; // true = no active permits for the day
+  isAvailable: boolean; // true = no in-season issued/pending slots returned
   reservedSlots: PermitSlot[];
-  availableSlots: number; // count of 30-min slots with no permit
   closingTime: string;   // "20:15"
 }
 
 // Normalized per-field result across a date range
 export interface FieldAvailability {
-  field: FieldRecord;
+  field: Pick<FieldRecord, "system" | "name">;
   days: DayAvailability[];
+}
+
+export type BookingStatus = "free" | "partial" | "busy";
+export type DayPeriod = "Morning" | "Afternoon" | "Evening";
+export interface DayStatus {
+  date: string;
+  status: BookingStatus;
+  bookedPeriods: DayPeriod[];
+  bookedTimes: string[];
+}
+
+export function boroughForSystem(system: string): string {
+  const boroughs: Record<string, string> = {
+    M: "Manhattan", B: "Brooklyn", Q: "Queens", X: "Bronx", R: "Staten Island",
+  };
+  return boroughs[system[0]] ?? "Unknown";
 }
