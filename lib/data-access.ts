@@ -1,4 +1,4 @@
-export const USER_AGENT = "NYCFieldFinder/0.1 (https://github.com/jacobwolf-1/mflat-case-study)";
+export const USER_AGENT = "NYCFieldFinder/0.1 (https://github.com/jacobwolf-1/NYC-Field-Finder)";
 
 // Serialize availability cache misses across searches and expanded rows.
 let pending: Promise<unknown> = Promise.resolve();
