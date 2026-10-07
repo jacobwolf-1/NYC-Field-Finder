@@ -1,124 +1,68 @@
-# NYC Parks Field Availability
+# NYC Field Finder
 
-[![CI](https://github.com/jacobwolf-1/mflat-case-study/actions/workflows/ci.yml/badge.svg)](https://github.com/jacobwolf-1/mflat-case-study/actions/workflows/ci.yml)
-![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg)
-![TypeScript 5](https://img.shields.io/badge/TypeScript-5-3178c6.svg)
+I built a comparison table for NYC Parks field availability, with boroughs, park names and expandable permit details.
 
-**Next.js 16 (App Router) · TypeScript · React 19 · reverse-engineered public-endpoint integration with disk caching.**
+Built as a time-boxed engineering case study (April 2026), later cleaned up and extended.
 
-Search field and court permit availability across NYC parks. This MVP uses the public NYC Parks permit workflow only — no private APIs or credentials required. The current UI supports short-range searches (up to 7 days) and shows a one-screen comparison table with expandable slot-level detail.
+## The problem
 
-> 📷 **Screenshot placeholder (MVP — capture pending).** Add `docs/media/table.png`:
-> the comparison table for a sport + date range with one row expanded to
-> slot-level detail. Reproduce the exact view with the "Demo query" below.
+> **Draft — awaiting my confirmation or rewrite from the original workflow:** League organizers and coaches need to find a field that fits their sport, location and schedule. The official NYC Parks permit map makes comparing several fields across several days awkward: I wanted to bring those choices into one table, then inspect the exact reservations before pursuing a permit.
 
-## One-line setup
+![Soccer availability for October 7–9, 2026, with Bushwick Playground expanded to show reserved slots and permit holders](docs/media/table.png)
 
-```bash
-npm install && node scripts/poc.mjs && npm run dev
-```
+## What I built
 
-Then open **http://localhost:3000**.
+- I reverse-engineered the permit map's vector tiles into a catalog of about **5,200 fields**, then added boroughs and an exact `gispropnum` join to [NYC Open Data park names](https://data.cityofnewyork.us/Recreation/Parks-Properties/enfh-gkve).
+- I found the **public JSON endpoints** behind the map and built a query flow that costs **four bulk calls per day**, regardless of field count. Slot detail is fetched only when a row is expanded.
+- I added **disk caching with TTLs** (15 minutes for snapshots, 30 minutes for detail), serialized availability requests with delays, and shared the data-access code between the Next.js app and exploration CLI.
 
-The `node scripts/poc.mjs` step builds the field catalog (~30 seconds, one time only). After that, all catalog reads are instant from disk.
+## Quick start
 
-## How to run
+**Node 22.6+** is required for `--experimental-strip-types`.
 
 ```bash
-# Install dependencies
-npm install
-
-# Build the field catalog (required once; re-run to refresh)
-node scripts/poc.mjs
-
-# Start the app
-npm run dev
+npm install && npm run catalog && npm run dev
 ```
 
-Open http://localhost:3000, choose a sport and date range, click Search.
+Open [localhost:3000](http://localhost:3000). Choose Soccer and three days, then expand a field.
 
-## How caching works
+Catalog setup fetches metadata only: 182 tiles in small batches and one park-name lookup. Cold-build time depends on NYC Parks latency; subsequent runs reuse the cache. To refresh metadata: `npm run catalog -- --refresh`.
 
-There are two layers of caching, both stored under `data/cache/`:
-
-| Cache | Location | TTL |
-|-------|----------|-----|
-| Field catalog | `data/cache/fields_catalog.json` | Permanent until manually deleted |
-| Availability snapshots | `data/cache/availability/snapshot_*.json` | 15 minutes |
-| Per-field slot detail | `data/cache/availability/fields/*.json` | 30 minutes |
-
-**Field catalog** — built by sweeping 182 vector tiles from `maps.nycgovparks.org` at zoom 13. Contains 5,208 permittable fields with sport type, surface, hours, and the system ID used in all API calls. Rebuild monthly or after major Parks system updates:
-
-```bash
-rm data/cache/fields_catalog.json && node scripts/poc.mjs
-```
-
-**Availability data** — fetched live from the NYC Parks permit API on each search. Short TTLs keep results fresh without hammering the server on repeated identical queries.
-
-## Why direct requests, not browser automation
-
-After inspecting the permit map's network traffic, we found two fully public JSON endpoints:
-
-```
-GET https://www.nycgovparks.org/api/athletic-fields?datetime=YYYY-MM-DD+H:mm
-GET https://www.nycgovparks.org/api/athletic-fields?location=SYSTEM_ID&date=YYYY-MM-DD
-```
-
-Both respond to plain HTTP GET with no session, cookies, or auth. A real browser UA header is required (the HTML page blocks headless requests, but the API endpoints do not). Playwright was used only for initial network traffic discovery.
-
-Direct requests are simpler, faster, and fully cacheable without a running browser process.
-
-See `docs/data-access-plan.md` for endpoint schemas, risk analysis, and full technical details.
+The original exploration CLI now imports the same library: `npm run poc -- SCR 2026-10-08 3`. It prints a short summary and saves JSON under `data/cache/`; an optional field ID fetches that field's slot detail.
 
 ## Architecture
 
+**Next.js App Router · TypeScript · React**
+
+```text
+app/page.tsx                  Search → comparison table → expanded slots
+app/api/availability/         Validated query → four snapshots per date
+app/api/field-detail/         Validated field/date → weekly permit detail
+lib/field-catalog.ts          Vector-tile catalog + cached park-name join
+lib/availability-client.ts    Snapshot summaries, slot normalization, caching
+lib/validation.ts            Shared input validation
+scripts/catalog.mjs          Catalog-only setup and refresh
 ```
-app/
-  page.tsx                    # client-side search UI (form + table + expandable rows)
-  api/availability/route.ts   # returns field table data for a sport + date range
-  api/field-detail/route.ts   # returns slot-level detail for one field
-lib/
-  field-catalog.ts            # builds/loads the field catalog from vector tiles
-  availability-client.ts      # wraps the two public NYC Parks API endpoints
-  types.ts                    # shared TypeScript types
-scripts/
-  poc.mjs                     # standalone CLI proof-of-concept (also seeds the catalog)
-data/cache/                   # all disk caches live here (gitignored)
-docs/
-  data-access-plan.md         # findings, endpoint schemas, risks, and implementation notes
-```
+
+All caches live in gitignored `data/cache/`. The field catalog and park-name lookup are reused until explicitly refreshed. Both JSON endpoints and the vector tiles accept the tool's honest `NYCFieldFinder/0.1` User-Agent; no browser process, credentials or spoofed browser identity is needed. [Data-access notes](docs/data-access-plan.md) cover endpoint schemas, caching and the verified park-name join.
+
+Suggested GitHub description: **Compare NYC Parks field availability across dates, with park locations and expandable permit details.**
+
+## Known limitations
+
+- **Sampled availability:** checks run at **09:00, 12:00, 15:00 and 18:00 New York time**. Free means no samples booked; Partly booked means some; Busy means all four. Morning/afternoon/evening labels describe booked samples, not continuous reservations. Bookings between checks can be missed; expand a row and confirm availability with Parks before pursuing a permit.
+- **Slot detail:** I show the number of returned in-season issued/pending reservation slots, not an estimated number of free slots. No returned reservations does not guarantee a field is open or bookable.
+- **Scope:** searches cover up to seven days and display up to 200 fields, with mixed availability first. The public endpoints are undocumented, and cached data can become stale.
+- **Locations:** the October 2026 refresh matched park names for 5,200 of 5,207 fields. Unmatched fields retain their field name and borough. This is a local case study, not a booking service.
 
 ## Tests
 
 ```bash
-npm test          # node:test unit suite (no extra dependencies)
-npm run lint      # eslint (eslint-config-next)
-npx tsc --noEmit  # type-check
+npm ci
+npm run lint
+npx tsc --noEmit
+npm test
+npm run build
 ```
 
-The unit suite (`tests/`) covers query validation, date-range generation,
-availability normalization (in-season / issued / pending logic), and the
-disk-cache TTL behavior. CI runs lint, type-check, tests, and a production build
-on every push.
-
-## Known limitations
-
-- **Search range is capped at 7 days** — the current UI/API intentionally limit the date range for a fast MVP.
-- **Daily status uses a noon snapshot** — the table marks a field as busy if it appears reserved at noon. A field with only morning or evening reservations may still appear free in the top-level table; expand a row for slot-level detail.
-- **Slot counts are approximate** — the "X/24 slots free" figure assumes a typical 24-slot day (8:00 AM–8:00 PM in 30-minute increments); a field that closes earlier has fewer real slots than that denominator implies. The expanded row always lists the actual reserved slots.
-- **Max 200 fields shown** — results are capped to keep the table usable. Fields with conflicts are prioritized near the top so the most decision-relevant rows are visible first.
-- **Catalog staleness** — field metadata changes infrequently; rebuild the catalog when needed.
-- **No published rate limits** — caching and short delays are used to stay polite to the public site.
-- **Local-only MVP** — no auth, DB, or deployment config.
-
-## Demo query
-
-Soccer fields — next 5 days:
-
-```
-Sport:      Soccer
-Start date: today
-Days:       5
-```
-
-Expected: ~266 soccer fields total, with up to 200 shown in the table. Fields with conflicts are prioritized near the top. Click any row to expand and see exact 30-minute slots and permit-holder names.
+The 15 dependency-free tests cover input validation, cache-path safety, date ranges, morning/afternoon/evening sampling, slot normalization, cache TTLs, concurrent request deduplication and location keys. CI runs lint, type-check, tests and a production build on pushes to `main` and pull requests. I also checked live searches, expanded permit details and desktop/mobile layouts in the browser; the screenshot above uses live October 2026 data.
