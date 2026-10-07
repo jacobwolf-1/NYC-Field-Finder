@@ -44,7 +44,7 @@ lib/validation.ts            Shared input validation
 scripts/catalog.mjs          Catalog-only setup and refresh
 ```
 
-All caches live in gitignored `data/cache/`. The field catalog and park-name lookup are reused until explicitly refreshed. Both JSON endpoints and the vector tiles accept the tool's honest `NYCFieldFinder/0.1` User-Agent; no browser process, credentials or spoofed browser identity is needed. [Data-access notes](docs/data-access-plan.md) cover endpoint schemas, caching and the verified park-name join.
+All caches live in gitignored `data/cache/`. The field catalog and park-name lookup are reused until explicitly refreshed. Requests identify themselves as `NYCFieldFinder/0.1`; no browser automation or credentials are needed. [Data-access notes](docs/data-access-plan.md) cover endpoint schemas, caching and the verified park-name join.
 
 ## Known limitations
 
