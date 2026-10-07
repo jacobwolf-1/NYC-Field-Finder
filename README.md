@@ -6,7 +6,7 @@ Built as a time-boxed engineering case study (April 2026), later cleaned up and 
 
 ## The problem
 
-> **Draft — awaiting my confirmation or rewrite from the original workflow:** League organizers and coaches need to find a field that fits their sport, location and schedule. The official NYC Parks permit map makes comparing several fields across several days awkward: I wanted to bring those choices into one table, then inspect the exact reservations before pursuing a permit.
+League organizers and coaches need to find a field that fits their sport, location and schedule. The official NYC Parks permit map makes comparing several fields across several days awkward: I wanted to bring those choices into one table, then inspect the exact reservations before pursuing a permit.
 
 ![Soccer availability for October 7–9, 2026, with Bushwick Playground expanded to show reserved slots and permit holders](docs/media/table.png)
 
