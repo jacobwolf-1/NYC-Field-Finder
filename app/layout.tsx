@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NYC Parks Field Availability",
+  title: "NYC Field Finder",
   description: "Search field & court permit availability across NYC parks",
 };
 

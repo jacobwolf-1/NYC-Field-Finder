@@ -1,4 +1,4 @@
-import type { SportCode } from "./types";
+import { SPORT_CODES, type SportCode } from "./types.ts";
 
 export const MAX_DAYS = 7;
 export const DEFAULT_DAYS = 3;
@@ -18,12 +18,6 @@ export type ParseResult =
   | { ok: true; value: AvailabilityQuery }
   | { ok: false; error: string };
 
-/**
- * Validates the raw query params for the availability endpoint. Pure and
- * framework-free so it can be unit-tested without spinning up Next. Sport-code
- * membership is intentionally left to the catalog lookup (which returns 404 for
- * a sport with no fields); this checks presence, date shape, and the day bound.
- */
 export function parseAvailabilityQuery(input: {
   sport: string | null;
   date: string | null;
@@ -33,6 +27,20 @@ export function parseAvailabilityQuery(input: {
   if (!sport || !date) {
     return { ok: false, error: "Missing required params: sport, date" };
   }
+  if (!Object.hasOwn(SPORT_CODES, sport)) {
+    return { ok: false, error: "Unknown sport code." };
+  }
+  const parsed = parseDateQuery(input);
+  if (!parsed.ok) return parsed;
+  const { days } = parsed.value;
+  return { ok: true, value: { sport: sport as SportCode, date, days } };
+}
+
+function parseDateQuery(input: { date: string | null; days: string | null }):
+  | { ok: true; value: { date: string; days: number } }
+  | { ok: false; error: string } {
+  const { date } = input;
+  if (!date) return { ok: false, error: "Missing required param: date" };
   if (!isValidDateString(date)) {
     return { ok: false, error: "Invalid date. Expected YYYY-MM-DD." };
   }
@@ -43,5 +51,25 @@ export function parseAvailabilityQuery(input: {
       error: `Invalid days value. Expected an integer between 1 and ${MAX_DAYS}.`,
     };
   }
-  return { ok: true, value: { sport: sport as SportCode, date, days } };
+  const end = new Date(date + "T00:00:00Z");
+  end.setUTCDate(end.getUTCDate() + days - 1);
+  if (!isValidDateString(end.toISOString().slice(0, 10))) {
+    return { ok: false, error: "Date range exceeds supported calendar dates." };
+  }
+  return { ok: true, value: { date, days } };
+}
+
+export function isValidSystemId(system: string): boolean {
+  return /^[MBQXR][A-Za-z0-9]{3,9}(?:-[A-Za-z0-9+]+)+$/.test(system) && system.length <= 100;
+}
+
+export function parseFieldDetailQuery(input: {
+  system: string | null; date: string | null; days: string | null;
+}) {
+  if (!input.system || !isValidSystemId(input.system)) {
+    return { ok: false as const, error: "Invalid field system ID." };
+  }
+  const parsed = parseDateQuery(input);
+  if (!parsed.ok) return parsed;
+  return { ok: true as const, value: { ...parsed.value, system: input.system } };
 }

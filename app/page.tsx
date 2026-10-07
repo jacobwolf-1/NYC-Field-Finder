@@ -1,26 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+
+import { SPORT_CODES, type DayStatus } from "@/lib/types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-const SPORTS = [
-  { code: "SCR", label: "Soccer" },
-  { code: "BSB", label: "Baseball" },
-  { code: "SFB", label: "Softball" },
-  { code: "BKB", label: "Basketball" },
-  { code: "FTB", label: "Football" },
-  { code: "HDB", label: "Handball" },
-  { code: "VLB", label: "Volleyball" },
-  { code: "CRK", label: "Cricket" },
-  { code: "TRK", label: "Track and Field" },
-  { code: "BOC", label: "Bocce" },
-  { code: "NTB", label: "Netball" },
-  { code: "RBY", label: "Rugby" },
-  { code: "HKY", label: "Hockey" },
-] as const;
+const SPORTS = Object.entries(SPORT_CODES).map(([code, label]) => ({ code, label }));
 
-type DayStatus = { date: string; status: "free" | "busy" };
 type FieldRow = {
   system: string;
   name: string;
@@ -28,6 +15,9 @@ type FieldRow = {
   close_at_dusk: string;
   opening_time: string;
   permit_parent: string;
+  borough: string;
+  park_name?: string;
+  closing_time: string;
   days: DayStatus[];
   freeDayCount: number;
 };
@@ -52,7 +42,6 @@ type DetailDay = {
   date: string;
   isAvailable: boolean;
   closingTime: string;
-  availableSlots: number;
   reservedSlots: SlotInfo[];
 };
 type DetailResponse = { system: string; fieldName: string; days: DetailDay[]; error?: string };
@@ -74,17 +63,22 @@ function fmtDayOfWeek(iso: string) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: "free" | "busy" }) {
-  if (status === "free")
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-        ✓ Free
-      </span>
-    );
+function StatusBadge({ day }: { day: DayStatus }) {
+  const styles = {
+    free: "bg-emerald-100 text-emerald-800",
+    partial: "bg-amber-100 text-amber-900",
+    busy: "bg-red-100 text-red-800",
+  };
+  const labels = { free: "✓ Free", partial: "Partly booked", busy: "Busy" };
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
-      ✗ Busy
-    </span>
+    <div title={day.bookedTimes.length ? `Booked at ${day.bookedTimes.join(", ")} New York time` : "No bookings at the four sampled times"}>
+      <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${styles[day.status]}`}>
+        {labels[day.status]}
+      </span>
+      <div className="mt-1 text-[11px] text-gray-500">
+        {day.bookedPeriods.length ? day.bookedPeriods.join(" · ") : "At sampled times"}
+      </div>
+    </div>
   );
 }
 
@@ -113,32 +107,28 @@ function DetailPanel({
   days: number;
 }) {
   const [data, setData] = useState<DetailResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(false);
-
-  async function load() {
-    if (fetched) return;
-    setLoading(true);
-    setFetched(true);
-    try {
-      const res = await fetch(
-        `/api/field-detail?system=${encodeURIComponent(system)}&date=${date}&days=${days}`
-      );
-      setData(await res.json());
-    } catch {
-      setData({ system, fieldName: system, days: [], error: "Failed to load" });
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        const res = await fetch(
+          `/api/field-detail?system=${encodeURIComponent(system)}&date=${date}&days=${days}`,
+          { signal: controller.signal }
+        );
+        const json: DetailResponse = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Failed to load field detail");
+        if (!controller.signal.aborted) setData(json);
+      } catch {
+        if (!controller.signal.aborted) {
+          setData({ system, fieldName: system, days: [], error: "Unable to load field detail. Please try again." });
+        }
+      }
     }
-  }
+    void load();
+    return () => controller.abort();
+  }, [system, date, days]);
 
-  // Auto-fetch on mount
-  if (!fetched) load();
-
-  if (loading)
-    return (
-      <div className="px-4 py-3 text-xs text-gray-400">Loading detail…</div>
-    );
+  if (!data) return <div className="px-4 py-3 text-xs text-gray-500">Loading detail…</div>;
   if (!data || data.error)
     return (
       <div className="px-4 py-3 text-xs text-red-500">
@@ -154,17 +144,13 @@ function DetailPanel({
             <span className="font-semibold text-gray-800">
               {fmtDayOfWeek(day.date)} {fmtDate(day.date)}
             </span>
-            {day.isAvailable ? (
-              <span className="text-xs font-medium text-emerald-600">All slots free</span>
-            ) : (
-              <span className="text-xs text-gray-500">
-                {day.availableSlots}/24 slots free
-              </span>
-            )}
+            <span className="text-xs text-gray-500">
+              {day.reservedSlots.length} reserved slots
+            </span>
           </div>
           <div className="text-xs text-gray-400 mb-2">Closes {day.closingTime}</div>
           {day.reservedSlots.length === 0 ? (
-            <p className="text-xs text-emerald-600">No reservations</p>
+            <p className="text-xs text-emerald-600">No in-season issued or pending reservations returned.</p>
           ) : (
             <div className="flex flex-col gap-1">
               {day.reservedSlots.map((s) => (
@@ -200,19 +186,23 @@ function FieldTableRow({
         onClick={() => setExpanded((e) => !e)}
       >
         <td className="py-2 pl-4 pr-3">
-          <div className="font-medium text-gray-900">{field.name}</div>
+          <button type="button" aria-expanded={expanded} className="text-left font-medium text-gray-900">
+            {field.park_name ?? field.name}
+          </button>
+          {field.park_name && <div className="text-xs text-gray-600">{field.name}</div>}
           <div className="text-xs text-gray-400">{field.system}</div>
         </td>
+        <td className="px-3 py-2 text-xs text-gray-600">{field.borough}</td>
         <td className="px-3 py-2 text-xs text-gray-500 hidden sm:table-cell">
           {field.surface_type}
         </td>
         <td className="px-3 py-2 text-xs text-gray-500 hidden md:table-cell">
           {field.opening_time}
-          {field.close_at_dusk === "TRUE" ? " – dusk" : ""}
+           – {field.close_at_dusk === "TRUE" ? "dusk" : field.closing_time || "Unknown"}
         </td>
         {field.days.map((day) => (
           <td key={day.date} className="px-3 py-2 text-center">
-            <StatusBadge status={day.status} />
+            <StatusBadge day={day} />
           </td>
         ))}
         <td className="px-3 py-2 text-right text-xs text-gray-400">
@@ -222,7 +212,7 @@ function FieldTableRow({
       {expanded && (
         <tr className="border-b border-gray-100 bg-white">
           <td colSpan={3 + dates.length + 2} className="p-0">
-            <DetailPanel system={field.system} date={startDate} days={days} />
+            <DetailPanel key={`${field.system}-${startDate}-${days}`} system={field.system} date={startDate} days={days} />
           </td>
         </tr>
       )}
@@ -256,20 +246,20 @@ export default function Home() {
         } else {
           setResult(json);
         }
-      } catch (err) {
-        setError(String(err));
+      } catch {
+        setError("Unable to load availability. Please try again.");
       }
     });
   }
 
-  const sportLabel = SPORTS.find((s) => s.code === sport)?.label ?? sport;
+  const sportLabel = SPORTS.find((s) => s.code === (result?.sport ?? sport))?.label ?? sport;
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
         <h1 className="text-lg font-semibold text-gray-900">
-          NYC Parks Field Availability
+          NYC Field Finder
         </h1>
         <p className="mt-0.5 text-sm text-gray-500">
           Live data from the public NYC Parks permit workflow
@@ -280,8 +270,9 @@ export default function Home() {
       <div className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
         <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600">Sport</label>
+            <label htmlFor="sport" className="text-xs font-medium text-gray-600">Sport</label>
             <select
+              id="sport"
               value={sport}
               onChange={(e) => setSport(e.target.value)}
               className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -295,8 +286,9 @@ export default function Home() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600">Start date</label>
+            <label htmlFor="date" className="text-xs font-medium text-gray-600">Start date</label>
             <input
+              id="date"
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
@@ -306,8 +298,9 @@ export default function Home() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-600">Days</label>
+            <label htmlFor="days" className="text-xs font-medium text-gray-600">Days</label>
             <select
+              id="days"
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
               className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -347,7 +340,7 @@ export default function Home() {
             <p className="mt-1 text-sm text-red-600">{error}</p>
             {error.includes("catalog") && (
               <p className="mt-2 font-mono text-xs text-red-500">
-                node scripts/poc.mjs SCR {todayStr()} 1
+                npm run catalog
               </p>
             )}
           </div>
@@ -366,17 +359,13 @@ export default function Home() {
                   </span>
                 )}
               </div>
-              <div className="flex gap-4 text-xs text-gray-400">
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  Free at noon
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-red-400" />
-                  Has noon reservation
-                </span>
+              <div className="flex flex-wrap gap-4 text-xs text-gray-600">
+                <span>🟢 Free: no samples booked</span>
+                <span>🟠 Partly booked: some samples</span>
+                <span>🔴 Busy: all four samples</span>
               </div>
             </div>
+            <p className="mb-4 max-w-4xl text-xs leading-relaxed text-gray-600">{result.note}</p>
 
             {/* Empty state */}
             {result.fields.length === 0 ? (
@@ -389,6 +378,7 @@ export default function Home() {
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
                       <th className="py-3 pl-4 pr-3">Field</th>
+                      <th className="px-3 py-3">Borough</th>
                       <th className="px-3 py-3 hidden sm:table-cell">Surface</th>
                       <th className="px-3 py-3 hidden md:table-cell">Hours</th>
                       {result.dates.map((d) => (
@@ -406,8 +396,8 @@ export default function Home() {
                         key={field.system}
                         field={field}
                         dates={result.dates}
-                        days={days}
-                        startDate={date}
+                        days={result.dates.length}
+                        startDate={result.dates[0]}
                       />
                     ))}
                   </tbody>
@@ -415,8 +405,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Note */}
-            <p className="mt-3 text-xs text-gray-400">{result.note}</p>
+            <p className="mt-3 text-xs text-gray-500">Expand a field for 30-minute slots and permit holders. All times are New York local time.</p>
           </>
         )}
 

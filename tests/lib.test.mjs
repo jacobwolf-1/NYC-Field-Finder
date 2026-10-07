@@ -95,18 +95,16 @@ test("normalizeFieldDetail counts only in-season issued/pending slots as reserve
   const [d22, d23, d24] = result.days;
 
   assert.equal(d22.reservedSlots.length, 2);
-  assert.equal(d22.availableSlots, 22); // 24 typical - 2 reserved
+  assert.equal("availableSlots" in d22, false);
   assert.equal(d22.isAvailable, false);
   assert.equal(d22.closingTime, "20:15");
 
   assert.equal(d23.reservedSlots.length, 1);
-  assert.equal(d23.availableSlots, 23);
 
-  // A day in range with no slot data is fully available and uses the default close time
+  // Missing slot data does not invent hours or an available-slot estimate.
   assert.equal(d24.reservedSlots.length, 0);
   assert.equal(d24.isAvailable, true);
-  assert.equal(d24.availableSlots, 24);
-  assert.equal(d24.closingTime, "20:00");
+  assert.equal(d24.closingTime, "Unknown");
 });
 
 // ── Caching behavior ──────────────────────────────────────────────────────────

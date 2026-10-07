@@ -2,7 +2,8 @@ import { type NextRequest } from "next/server";
 import { existsSync } from "fs";
 import path from "path";
 import { buildCatalog } from "@/lib/field-catalog";
-import { getReservedIds, dateRange, SNAPSHOT_TIME } from "@/lib/availability-client";
+import { getDailySnapshots, summarizeDay, dateRange, AVAILABILITY_NOTE } from "@/lib/availability-client";
+import { boroughForSystem, type DayStatus } from "@/lib/types";
 import { parseAvailabilityQuery } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -22,13 +23,13 @@ export async function GET(req: NextRequest) {
   }
   const { sport, date, days } = parsed.value;
 
-  // Require the catalog to be pre-built (run `node scripts/poc.mjs` first)
+  // Catalog construction is an explicit setup step.
   const catalogPath = path.resolve(process.cwd(), "data/cache/fields_catalog.json");
   if (!existsSync(catalogPath)) {
     return Response.json(
       {
-        error: "Field catalog not built yet. Run: node scripts/poc.mjs SCR 2026-04-22 1",
-        hint: "This seeds the tile catalog (~30s). Subsequent runs are instant.",
+        error: "Field catalog not built yet. Run: npm run catalog",
+        hint: "This builds the tile catalog. Subsequent runs reuse the disk cache.",
       },
       { status: 503 }
     );
@@ -46,15 +47,8 @@ export async function GET(req: NextRequest) {
 
     const dates = dateRange(date, days);
 
-    // One snapshot call per date (noon NYC time). Results are disk-cached 15 min.
-    const snapshots = await Promise.all(
-      dates.map((d) => getReservedIds(d, SNAPSHOT_TIME))
-    );
+    const snapshots = await getDailySnapshots(dates);
 
-    const reservedSets = snapshots.map((s) => new Set(s.l));
-
-    // Build per-field daily status from snapshots
-    type DayStatus = { date: string; status: "free" | "busy" };
     type Row = {
       system: string;
       name: string;
@@ -62,17 +56,20 @@ export async function GET(req: NextRequest) {
       close_at_dusk: string;
       opening_time: string;
       permit_parent: string;
+      borough: string;
+      park_name?: string;
+      closing_time: string;
       days: DayStatus[];
       freeDayCount: number;
     };
 
     const rows: Row[] = sportFields.map((f) => {
-      const days: DayStatus[] = dates.map((d, i) => ({
-        date: d,
-        status: reservedSets[i].has(f.system) ? "busy" : "free",
-      }));
+      const days = dates.map((date, i) => summarizeDay(f.system, date, snapshots[i]));
       return {
         system: f.system,
+        borough: boroughForSystem(f.system),
+        park_name: f.park_name,
+        closing_time: f.closing_time,
         name: f.name,
         surface_type: f.surface_type,
         close_at_dusk: f.close_at_dusk,
@@ -83,13 +80,13 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Sort: partial (some busy + some free) → fully reserved → fully free.
+    // Prioritize fields with a mix of booked and free samples.
     // This ensures real reservations are visible and not cut off by the cap.
     function sortKey(r: Row): number {
       const busyDays = r.days.length - r.freeDayCount;
-      if (busyDays > 0 && r.freeDayCount > 0) return 0; // partial: most interesting
-      if (busyDays > 0) return 1;                         // fully reserved
-      return 2;                                            // fully free
+      if (r.days.some((d) => d.status === "partial") || (busyDays > 0 && r.freeDayCount > 0)) return 0;
+      if (busyDays > 0) return 1;
+      return 2;
     }
     rows.sort((a, b) => {
       const ka = sortKey(a), kb = sortKey(b);
@@ -105,10 +102,10 @@ export async function GET(req: NextRequest) {
       total,
       shown: limited.length,
       fields: limited,
-      note: "Status = busy if field appears in the noon availability snapshot. Expand a row for full day detail.",
+      note: AVAILABILITY_NOTE,
     });
   } catch (err) {
     console.error("[availability]", err);
-    return Response.json({ error: "Internal error", detail: String(err) }, { status: 500 });
+    return Response.json({ error: "Unable to load availability. Please try again." }, { status: 500 });
   }
 }
