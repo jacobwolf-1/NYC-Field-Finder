@@ -112,7 +112,7 @@ test("normalizeFieldDetail counts only in-season issued/pending slots as reserve
 test("getReservedIds serves from disk cache within TTL and refetches when stale", async () => {
   const realFetch = globalThis.fetch;
   const prevCwd = process.cwd();
-  const tmp = mkdtempSync(join(tmpdir(), "mflat-cache-"));
+  const tmp = mkdtempSync(join(tmpdir(), "NYC-parks-cache-"));
   let calls = 0;
   globalThis.fetch = async () => {
     calls += 1;
